@@ -40,8 +40,8 @@ pub fn while_(
         @compileError("cond_fn and body_fn signatures don't match ! " ++ @typeName(@TypeOf(cond_fn)) ++ " and " ++ @typeName(@TypeOf(body_fn)));
     }
     const ctx = CompilationContext.current();
-    const cond_block = ctx.makeBlock(cond_fn, CondS, blkctx, inputs);
-    const body_block = ctx.makeBlock(body_fn, BodyS, blkctx, inputs);
+    const cond_block = ctx.makeBlock(CondS, &cond_fn, blkctx, inputs);
+    const body_block = ctx.makeBlock(BodyS, &body_fn, blkctx, inputs);
     var input_values: [BodyS.nIn]mlir.Value = undefined;
     ctx.extractValues(&inputs, &input_values);
 
@@ -132,7 +132,7 @@ pub fn reduce(
     var init_values: [N]mlir.Value = undefined;
     ctx.extractValues(&inits, &init_values);
 
-    const body_block = ctx.makeBlock(body_fn, BodyS, {}, .{ inits, inits });
+    const body_block = ctx.makeBlock(BodyS, &body_fn, {}, .{ inits, inits });
 
     const loc = ctx.mlirCtx().location(@src());
 
@@ -222,7 +222,7 @@ pub fn reduceWindow(
         if (BodyS.Return != @TypeOf(inputs)) @compileError("reduce body function need to have the following signature `fn (left: T, right: T) T`, got: " ++ @typeName(body_fn));
     }
     const ctx = CompilationContext.current();
-    const body_block = ctx.makeBlock(body_fn, BodyS, {}, .{ inits, inits });
+    const body_block = ctx.makeBlock(BodyS, &body_fn, {}, .{ inits, inits });
     const N = comptime @divExact(BodyS.nIn, 2);
     var input_values: [N]mlir.Value = undefined;
     ctx.extractValues(&inputs, &input_values);
@@ -394,8 +394,8 @@ pub fn if_(
         @compileError("true_branch_fn and false_branch_fn return types don't match ! " ++ @typeName(TrueBlockSignature.Return) ++ " and " ++ @typeName(FalseBlockSignature.Return));
     }
     const ctx = CompilationContext.current();
-    const true_branch_block = ctx.makeBlock(true_branch_fn, TrueBlockSignature, blkctx, {});
-    const false_branch_block = ctx.makeBlock(false_branch_fn, TrueBlockSignature, blkctx, {});
+    const true_branch_block = ctx.makeBlock(TrueBlockSignature, &true_branch_fn, blkctx, {});
+    const false_branch_block = ctx.makeBlock(TrueBlockSignature, &false_branch_fn, blkctx, {});
     const loc = ctx.mlirCtx().location(@src());
 
     const op = mlir.Operation.make(ctx.mlirCtx(), "stablehlo.if", .{
@@ -457,7 +457,7 @@ pub fn sort(
         inits[i * 2 + 1] = Tensor{ ._shape = arg_shape, ._id = undefined, ._donation = .no_buffer };
     }
     const ctx = CompilationContext.current();
-    const block = ctx.makeBlock(comp_fn, BodyS, blkctx, inits);
+    const block = ctx.makeBlock(BodyS, &comp_fn, blkctx, inits);
     var input_values: [@divExact(BodyS.nIn, 2)]mlir.Value = undefined;
     ctx.extractValues(&inputs, &input_values);
 
@@ -482,6 +482,7 @@ pub fn sort(
 }
 
 pub const BlockSignature = struct {
+    Fn: type,
     BlkCtx: type,
     Args: type,
     FullArgs: type,
@@ -567,7 +568,8 @@ fn _BlockSign(comptime func: anytype, blk_type: BlockType) BlockSignature {
         .no_args => void,
     };
 
-    const xx = .{
+    return .{
+        .Fn = @TypeOf(func),
         .BlkCtx = BlkCtx,
         .Args = Args,
         .FullArgs = FullArgs,
@@ -575,7 +577,6 @@ fn _BlockSign(comptime func: anytype, blk_type: BlockType) BlockSignature {
         .nIn = n_tensors,
         .nOut = staticCountTensors(fn_info.return_type.?) orelse @compileError("Can't use " ++ @typeName(fn_info.return_type.?) ++ " in an MLIR function, because it has a variable number of tensors"),
     };
-    return xx;
 }
 
 pub fn staticIsOnlyTensors(comptime T: type) bool {
